@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # this is a script meant for monitoring Logical Volumes,
 # when a volume reaches a threshold, it calls another script on that volume and makes an alert
 
@@ -13,15 +13,16 @@
 	# select third column from standard input with default delimiter (space): awk '{print $3}'
 
 # Variables initializations and Defaults
-threshold=40
 	# Argument initialisation
 	verbose=0
 	target_script=""
+	threshold=90
 
 # Arguments Handling
 	
 	# Argument Values
 	argverbose='--verbose'
+	argthreshold='--threshold='
 
 for argument in "$@"
 do
@@ -34,6 +35,10 @@ do
 	if [ -f "$argument" ]
 	then	target_script=$argument
 	fi
+
+	if [[ $argument == "$argthreshold"* ]];
+	then threshold=$(echo "$argument" | awk -F "=" '{print $2}' | cut -d'%' -f 1); echo "threshold is set at $threshold"
+	fi
 done
 
 # Start
@@ -42,7 +47,8 @@ done
 logical_volumes_paths=$(lvdisplay |grep "LV Path" | awk '{print $3}')
 
 
-echo "Detected Volumes for monitoring:\n\n$logical_volumes_paths\n"
+echo -e "\nDetected Volumes for monitoring:"
+echo -e "$logical_volumes_paths\n"
 
 
 for volume in $logical_volumes_paths
@@ -52,13 +58,13 @@ do
 		# Beyond threshold
 		then
 			if [ $verbose -eq 1 ]; then
-				echo "the volume $volume usage is: $percentage% ,Beyond threshold\n\tExecuting target script: $target_script $volume"
+				echo -e "-the volume $volume usage is: $percentage% ,Beyond threshold\n\tExecuting target script: $target_script $volume"
 			fi
-			sh $target_script $volume
+			bash $target_script $volume $threshold
 		# Under threshold
 		else
 			if [ $verbose -eq 1 ]; then
-				echo "the volume $volume usage is: $percentage% , Below threshold, not executing target script"
+				echo -e "the volume $volume usage is: $percentage below threshold not executing target script"
 			fi
 	fi
 done
