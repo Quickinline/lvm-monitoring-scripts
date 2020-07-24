@@ -138,20 +138,22 @@ done
 		let available_crisis_two+=(100-use)*total/100
 	done
 
-	
-
 	# if there's free space in the volume group we count it as available
-	if [ $vgfree -gt 0 ]
-	then
-		# we add that available space to the free space in volume group
-		let total_available=available+vgfree
-	else
-		total_available=$available
-	fi
-
+		if [ $vgfree -gt 0 ]
+		then
+			# we add that available space to the free space in volume group
+			let total_available=available+vgfree
+			let total_available_crisis=available_crisis+vgfree
+			let total_available_crisis_two=available_crisis_two+vgfree
+		else
+			total_available=$available
+			total_available_crisis=$available_crisis
+			total_available_crisis_two=$available_crisis_two
+		fi
 
 	if [ $total_available -gt $needed ]
 	then
+
 		# no crisis mode
 		echo "no crisis mode"
 
@@ -170,35 +172,114 @@ done
 			# echo "free=$free;available=$available;needed=$needed"
 			removed=$(awk "BEGIN {removed=($free/$available)*($needed-$vgfree); print removed}")
 			echo "$volume will offer ${removed} mb"
+			lvreduce -L ${removed}M $volume
+
 		done
 
-
+		# for each volume in receivers we will add the needed space
 		for volume in $receivers
 		do
 			use=$(df -m $volume| awk 'FNR == 2{print $5}'| cut -d'%' -f 1);
 			let total=$(df -m $volume| awk 'FNR == 2{print $4}')+$(df -m $volume| awk 'FNR == 2{print $3}')
 
-			let needed=(use - threshold+security_margin)*total/100
+			let volume_needed=(use - threshold+security_margin)*total/100
 			echo "the volume $volume will receive $needed mb"
+
+			lvextend -L +${volume_needed}M $volume
+
 		done
 		exit 0
 	else
 		# crisis mode
-		if [ $available_crisis -gt $needed_crisis ]
+
+		if [ $total_available_crisis -gt $needed_crisis ]
 		then
 			# we're in crisis mode 1 (we can still maintain the threshold, but we've crossed the security margin)
+
+			# if there's free space in the volume group we count it as available
+			if [ $vgfree -gt 0 ]
+			then
+				# we add that available space to the free space in volume group
+				let total_available=available_crisis+vgfree
+			else
+				total_available=$available_crisis
+			fi
 			echo "crisis mode 1"
 			
 			echo "available space (crisis mode: off):"
 			echo -e "\tVolume group: ${vgfree} mb"
 			echo -e "\tDonors: ${available_crisis} mb"
 			echo -e "\tTOTAL: ${total_available} mb"
+			
+			# for each volume in donors we will remove the necessary space
+			for volume in $donors
+			do
+				use=$(df -m $volume| awk 'FNR == 2{print $5}'| cut -d'%' -f 1);
+				let total=$(df -m $volume| awk 'FNR == 2{print $4}')+$(df -m $volume| awk 'FNR == 2{print $3}')
+
+				let free=(threshold - use)*total/100
+				# echo "free=$free;available=$available;needed=$needed"
+				removed=$(awk "BEGIN {removed=($free/$available)*($needed-$vgfree); print removed}")
+				echo "$volume will offer ${removed} mb"
+				lvreduce -L ${removed}M $volume
+			done
+
+			# for each volume in receivers we will add the needed space
+			for volume in $receivers
+			do
+				use=$(df -m $volume| awk 'FNR == 2{print $5}'| cut -d'%' -f 1);
+				let total=$(df -m $volume| awk 'FNR == 2{print $4}')+$(df -m $volume| awk 'FNR == 2{print $3}')
+
+				let volume_needed=(use - threshold)*total/100
+				echo "the volume $volume will receive $volume_needed mb"
+	
+				lvextend -L +${volume_needed}M $volume
+			done
+
 			exit 0
 		else
 			# we're in crisis mode 2 (we cannot maintain the threshold anymore)
 			echo "crisis mode 2"
-			exit 0
+			# when we can't maintain the threshold, we need a unit of transfer, the minimum unit of transfer available
+			# to do that we'll even out all the logical volumes each time, we'll balance the empty space
+			all_volumes=lvdisplay $vg_name | grep "LV Path" | awk '{print $3}'
+			list_all_volumes=($all_volumes)
+			list_count=${#list_all_volumes[@]}
 
+			# calculating true total space
+			total_space_available=$vgfree
+			for volume in $all_volumes
+			do
+				let total_space_available+=$(df -m $volume | awk 'FNR==2{print $4}')
+			done
+
+				required_each=$(awk "BEGIN {result=$total_space_available/$list_count; print result}")
+
+			for volume in $all_volumes
+			do
+				free_space=$(df -m $volume | awk 'FNR == 2{print $4}')
+				
+				echo -e "free: $free_space\trequired: $required"
+				# if the free space is bigger than the required (equally distributed)
+				if [ $free_space -gt $required_each ]
+				then
+					let difference=free_space-required_each
+					lvreduce -L ${difference}M $volume
+				fi
+			done
+
+			for volume in $all_volumes
+			do
+				free_space=$(df -m $volume | awk 'FNR == 2{print $4}')
+				
+				echo -e "free: $free_space\trequired: $required"
+				# if the free space is bigger than the required (equally distributed)
+				if [ $required_each -gt $free_space ]
+				then
+					let difference=required_each-free_space
+					extend -L ${difference}M $volume
+				fi
+			done
 		fi
 	fi
 	
