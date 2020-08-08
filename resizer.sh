@@ -206,7 +206,7 @@ done
 			fi
 			echo "crisis mode 1"
 			
-			echo "available space (crisis mode: off):"
+			echo "available space (crisis mode: on):"
 			echo -e "\tVolume group: ${vgfree} mb"
 			echo -e "\tDonors: ${available_crisis} mb"
 			echo -e "\tTOTAL: ${total_available} mb"
